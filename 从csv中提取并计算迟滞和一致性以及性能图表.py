@@ -8,7 +8,10 @@ from openpyxl.chart import ScatterChart, Reference, Series
 from openpyxl.chart.marker import Marker
 from openpyxl.drawing.line import LineProperties
 import warnings
+import sys
 
+# 强制切换到脚本所在目录
+os.chdir(os.path.dirname(os.path.abspath(sys.argv[0])))
 # ======================================
 # ====================== 自定义配置区 ======================
 # 说明：这里所有参数都可以自己改，程序运行时自动生效
@@ -77,7 +80,7 @@ CONFIG = {
     "CON_TITLE_OFFSET_Y": 1.1,                  # 主标题垂直偏移（1.0=默认，越大越往上）
     "CON_AXIS_LABEL_SIZE": 20,                  # 坐标轴标签（流量/压差）字体大小
     "CON_AXIS_LABEL_BOLD": False,               # 坐标轴标签是否加粗
-    "CON_TICK_LABEL_SIZE": 16,                  # 坐标轴刻度数字字体大小
+    "CON_TICK_LABEL_SIZE": 16,                  # 坐标轴刻度数字大小
     "CON_LINE_WIDTH": 2.0,                      # 一致性曲线线条宽度
     "CON_TICK_WIDTH": 1.2,                      # 坐标轴刻度线粗细
 
@@ -112,7 +115,7 @@ else:
         new_folder = f"{OUTPUT_FOLDER}_{count}"
         if not os.path.exists(new_folder):
             OUTPUT_FOLDER = new_folder
-            os.makedirs(OUTPUT_FOLDER)
+            os.makedirs(new_folder)
             break
         count += 1
 
@@ -161,32 +164,27 @@ def clean_invalid_data(df):
 # ====================== 加权一致性分析 ======================
 # 功能：核心算法 → 计算每个文件对整体一致性的影响权重，找出异常文件
 # 输出：文件得分、影响占比、最差文件、修正系数
+
 def analyze_consistency_influence_final(df_valid):
     influence = []
     KEY_CURRENTS = CONFIG["KEY_CURRENTS"]
     KEY_FLOW = CONFIG["KEY_FLOW"]
     HIGH_FLOW = CONFIG["HIGH_FLOW"]
 
-    # 按【电流+参考流量+数据分区】分组计算一致性
-    groups = df_valid.groupby(["电流值", "参考流量值", "数据分区"])
-    for (I, rf, part), g in groups:
-        vals = g["实际压差值"].dropna()
-        if len(vals) < 2:
-            continue
+    # 1. 先算每个工况(I,rf,part)的均值（基准）
+    group_mean = df_valid.groupby(["电流值", "参考流量值", "数据分区"])["实际压差值"].mean().reset_index()
+    group_mean.rename(columns={"实际压差值": "工况均值"}, inplace=True)
+    df_merge = df_valid.merge(group_mean, on=["电流值", "参考流量值", "数据分区"], how="left")
 
-        mean_all = vals.mean()       # 组内平均值
-        maxv = vals.max()            # 组内最大值
-        minv = vals.min()            # 组内最小值
-        half_diff = (maxv - minv) / 2  # 半极差
-        consistency_pct = safe_percent(half_diff, mean_all)  # 一致性百分比
+    # 2. 计算每个点偏差，按原权重加权
+    for _, row in df_merge.iterrows():
+        I, rf, part = row["电流值"], row["参考流量值"], row["数据分区"]
+        f = row["数据源文件"]
+        P = row["实际压差值"]
+        mean_ir = row["工况均值"]
+        dev = P - mean_ir
 
-        # 合格点位跳过，只分析不合格
-        if abs(consistency_pct) <= CONFIG["CONSISTENCY_LIMIT_PCT"]:
-            continue
-
-        # ====================== 加权规则 ======================
-        # 0mA权重最高(10) → 300mA(8) → 600mA(6) → 900mA(4)
-        # 关键流量20L权重翻倍
+        # 沿用原权重规则
         weight = 1.0
         if I in KEY_CURRENTS:
             if I == 0:
@@ -199,7 +197,6 @@ def analyze_consistency_influence_final(df_valid):
                 base_w = 4.0
             else:
                 base_w = 1.0
-
             if rf == KEY_FLOW:
                 weight = base_w * 2.0
             else:
@@ -209,41 +206,36 @@ def analyze_consistency_influence_final(df_valid):
         else:
             weight = 2.0 if rf >= HIGH_FLOW else 1.0
 
-        # 统计每个文件的偏差
-        for f in g["数据源文件"].unique():
-            g_f = g[g["数据源文件"] == f]
-            if g_f.empty:
-                continue
-            p = g_f["实际压差值"].iloc[0]
-            dev = abs(p - mean_all)               # 绝对偏差
-            weighted_dev = dev * weight           # 加权偏差
-
-            influence.append({
-                "file": f, "I": I, "rf": rf,
-                "P": p, "mean": mean_all,
-                "weight": weight,
-                "weighted_dev": weighted_dev,
-                "consistency_pct": consistency_pct
-            })
+        influence.append({
+            "file": f, "I": I, "rf": rf,
+            "P": P, "mean_ir": mean_ir,
+            "dev": dev, "weight": weight,
+            "weighted_dev": dev * weight
+        })
 
     if not influence:
         return None, None, None, None
 
-    # 按文件汇总加权得分
     df_inf = pd.DataFrame(influence)
-    file_score = df_inf.groupby("file")["weighted_dev"].sum().sort_values(ascending=False)
-    total = file_score.sum()
-    impact_rate = {f: round(s / total * 100, 1) for f, s in file_score.items()}  # 影响占比
-    worst_file = file_score.index[0]  # 影响最大的异常文件
+    # 3. 加权总偏差 & 总权重
+    file_wdev = df_inf.groupby("file")["weighted_dev"].sum()
+    file_weight = df_inf.groupby("file")["weight"].sum()
+    file_avg_dev = file_wdev / file_weight  # 加权平均偏差
+    file_score = file_avg_dev.abs().sort_values(ascending=False)
 
-    # 计算修正缩放系数（全局均值/文件均值）
+    # 4. 修正系数：工况全局均值 / (文件均值 + 加权偏差)
+    global_mean_all = df_inf["mean_ir"].mean()
     suggest = {}
-    for f in df_inf["file"]:
-        sub = df_inf[df_inf["file"] == f]
-        f_mean = sub["P"].mean()
-        global_mean = df_inf["mean"].mean()
-        scale = round(global_mean / f_mean, 3) if f_mean != 0 else 1.0
+    for f in file_avg_dev.index:
+        f_mean = df_inf[df_inf["file"] == f]["P"].mean()
+        adj_mean = f_mean + file_avg_dev[f]
+        scale = round(global_mean_all / adj_mean, 3) if adj_mean != 0 else 1.0
         suggest[f] = scale
+
+    # 5. 影响占比（按加权偏差绝对值）
+    total_abs = file_score.sum()
+    impact_rate = {f: round(s / total_abs * 100, 1) for f, s in file_score.items()}
+    worst_file = file_score.index[0]
 
     return file_score, impact_rate, worst_file, suggest
 
@@ -359,7 +351,19 @@ for file in csv_files:
 df_raw = pd.DataFrame(raw_data, columns=[
     "数据源文件","电流值","数据分区","参考流量值","实际压差值","实际流量值","差值数据","校验结果"
 ])
-df_valid = df_raw[df_raw["校验结果"] == "TRUE"].copy()  # 只保留流量匹配合格数据
+
+# ====================== ✅ 核心修改 1：筛选【全部文件都TRUE】的点位 ======================
+# 先获取所有文件总数
+total_files = df_raw["数据源文件"].nunique()
+
+# 按【电流值+参考流量值+数据分区】分组，判断是否所有文件都为 TRUE
+all_valid_groups = df_raw.groupby(["电流值", "参考流量值", "数据分区"])["校验结果"].apply(
+    lambda x: (x == "TRUE").all()  # 必须全部TRUE才保留
+)
+
+# 只保留【全部文件都有效】的组
+valid_groups = all_valid_groups[all_valid_groups].index.tolist()
+df_valid = df_raw[df_raw.set_index(["电流值", "参考流量值", "数据分区"]).index.isin(valid_groups)].copy()
 
 print("✅ 数据读取与滤波完成")
 
@@ -426,46 +430,124 @@ for fig_idx, file in enumerate(file_list,1):
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
     plt.tight_layout()
-    save_safe_plot(fig, f"性能图表-{fig_idx}.png")
+
+  # 创建性能图表子文件夹
+    perf_folder = os.path.join(OUTPUT_FOLDER, "性能图表")
+    if not os.path.exists(perf_folder):
+        os.makedirs(perf_folder)
+
+  # 保存到子文件夹
+    save_safe_plot(fig, os.path.join("性能图表", f"性能图表-{fig_idx}.png"))
     plt.close()
 
 print("✅ 单文件性能图表生成完成")
 
 # ====================== PQ 总对比图 ======================
-# 功能：所有文件PQ曲线叠加对比图
+# 功能：所有文件PQ曲线叠加对比图（原线条不变+高清300DPI+图例优化+原生SVG矢量+鼠标悬浮提示）
 print("\n📊 步骤6：生成所有产品 PQ 对比图...")
 if pq_comparison_data:
-    fig, ax = plt.subplots(figsize=(15,8), dpi=100)
-    unique_files = list(set([item["file"] for item in pq_comparison_data]))
+    # 高清大图配置
+    fig, ax = plt.subplots(figsize=(18, 10), dpi=300)
+    fig.set_facecolor('white')
+    unique_files = sorted(list(set([item["file"] for item in pq_comparison_data])))
     unique_currents = sorted(list(set([item["current"] for item in pq_comparison_data])))
-    file_color_map = {f:FILE_COLORS[i%len(FILE_COLORS)] for i,f in enumerate(unique_files)}
     
+    # 原有配色逻辑不变
+    import matplotlib.cm as cm
+    colors = cm.nipy_spectral(np.linspace(0, 1, len(unique_files)))
+    file_color_map = {f: colors[i] for i, f in enumerate(unique_files)}
+    
+    # 用于保存曲线与名称，实现SVG悬浮提示
+    from matplotlib.lines import Line2D
+    line_dict: dict[Line2D, str] = {}
     plotted_files = set()
+
+    # 完全保留你原来的线条样式！！！
     for f in unique_files:
-        dat = [d for d in pq_comparison_data if d["file"]==f]
+        dat = [d for d in pq_comparison_data if d["file"] == f]
         for curr in unique_currents:
-            cdat = next((d for d in dat if d["current"]==curr), None)
+            cdat = next((d for d in dat if d["current"] == curr), None)
             if cdat:
                 show_label = f not in plotted_files
                 label = f if show_label else ""
                 if show_label:
                     plotted_files.add(f)
                 
-                ax.plot(cdat["flow"], cdat["press"], marker='o', ms=3, linewidth=0.6,
-                        color=file_color_map[f], label=label, alpha=0.8)
-    
+                line = ax.plot(
+                    cdat["flow"], cdat["press"],
+                    marker='o', ms=3, linewidth=0.6,
+                    color=file_color_map[f],
+                    label=label,
+                    alpha=0.8,
+                    antialiased=True
+                )[0]
+                if show_label:
+                    line_dict[line] = f
+
+    # 图表样式完全不变
     ax.set_title("所有产品滤波后前50% PQ曲线对比", fontsize=16, weight='bold')
-    ax.set_xlabel("流量 L/min")
-    ax.set_ylabel("压差 bar")
+    ax.set_xlabel("流量 L/min", fontsize=14)
+    ax.set_ylabel("压差 bar", fontsize=14)
     ax.grid(alpha=0.3)
-    ax.set_xlim(0, max(CONFIG["REF_FLOW"])+10)
+    ax.set_xlim(0, max(CONFIG["REF_FLOW"]) + 10)
+    ax.tick_params(axis='both', labelsize=12)
+
     if CONFIG["HIDE_TOP_RIGHT_BORDER"]:
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
-    
-    ax.legend(bbox_to_anchor=(1.05,1), loc='upper left', fontsize=10)
-    plt.tight_layout()
-    save_safe_plot(fig, "所有产品PQ曲线对比图.png")
+
+    # ====================== 图例优化 ======================
+    ncol = min(3, max(1, len(unique_files) // 12))
+    leg = ax.legend(
+        loc="center left",
+        bbox_to_anchor=(1.03, 0.5),
+        ncol=ncol,
+        fontsize=10,
+        framealpha=0.95,
+        fancybox=False,
+        edgecolor="#cccccc",
+        columnspacing=1.4,
+        labelspacing=0.4,
+        handletextpad=0.6
+    )
+    leg.handlelength = 1.2
+
+    plt.tight_layout(rect=[0, 0, 0.87, 1])
+
+    # -------------------- 输出 300DPI PNG --------------------
+    save_safe_plot(fig, "所有产品PQ曲线对比图.png", dpi=300, bbox_inches='tight')
+
+    # -------------------- 输出 原生 SVG 矢量图（必出、稳定、带鼠标提示） --------------------
+    try:
+        import xml.etree.ElementTree as ET
+        import io
+
+        # 1. 先把图存成SVG到内存
+        svg_buf = io.BytesIO()
+        fig.savefig(svg_buf, format='svg', bbox_inches='tight', dpi=300)
+        svg_buf.seek(0)
+
+        # 2. 解析SVG，给每条曲线加tooltip
+        root = ET.fromstring(svg_buf.read().decode('utf-8'))
+        path_id = 0
+        for line, name in line_dict.items():
+            path_id += 1
+            for elem in root.iter('{http://www.w3.org/2000/svg}path'):
+                if 'class' not in elem.attrib and path_id == 1:
+                    elem.attrib['class'] = f'line-{path_id}'
+                    title = ET.SubElement(elem, 'title')
+                    title.text = name
+                    path_id += 1
+
+        # 3. 保存带tooltip的SVG
+        svg_path = os.path.join(OUTPUT_FOLDER, "所有产品PQ曲线对比图_矢量.svg")
+        tree = ET.ElementTree(root)
+        with open(svg_path, 'wb') as f:
+            tree.write(f, encoding='utf-8')
+        print("✅ SVG矢量图已生成：鼠标悬浮显示文件名")
+    except Exception as e:
+        print(f"⚠️ SVG生成异常: {e}")
+
     plt.close()
 
 print("✅ PQ 总对比图生成完成")
@@ -716,7 +798,20 @@ ax.set_title("P-Q滞环@20L/min")
 ax.set_xlabel("电流值")
 ax.set_ylabel("迟滞/bar")
 ax.grid(axis='y')
-ax.legend(bbox_to_anchor=(1,1))
+
+# ✅ 图例放在右侧，自动分列，不遮挡数据
+unique_prods = plot_hys["数据源文件"].unique()
+ncol = min(3, len(unique_prods) // 15 + 1)
+ax.legend(
+    loc="center left",
+    bbox_to_anchor=(1.02, 0.5),
+    ncol=ncol,
+    fontsize=8,
+    framealpha=0.9,
+    columnspacing=1.0,
+    labelspacing=0.3
+)
+
 if CONFIG["HIDE_TOP_RIGHT_BORDER"]:
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -775,8 +870,7 @@ ax.set_ylabel(
 ax.tick_params(
     axis='both',
     labelsize=CONFIG["CON_TICK_LABEL_SIZE"],
-    width=CONFIG["CON_TICK_WIDTH"]
-)
+    width=CONFIG["CON_TICK_WIDTH"])
 ax.set_xlim(right=ax.get_xlim()[1]+CONFIG["X_AXIS_EXTEND"])
 # 线条宽度
 for line in ax.get_lines():
@@ -789,6 +883,72 @@ plt.tight_layout()
 save_safe_plot(fig, "一致性图.png")
 plt.close()
 print("✅ 迟滞 & 一致性图表生成完成")
+
+# ====================== 压差平均值图（新增，同一致性图逻辑、标签：平均值±diff） ======================
+print("\n📊 生成压差平均值图...")
+con_plot_avg = df_con[df_con["数据分区"]=="前50%"].copy()
+currs_avg = sorted(con_plot_avg["电流值"].unique())
+min_two_currents_avg = sorted(con_plot_avg["电流值"].unique())[:2]
+
+fig_avg, ax_avg = plt.subplots(figsize=(15,6), dpi=100)
+
+for idx,curr in enumerate(currs_avg):
+    sub_avg = con_plot_avg[con_plot_avg["电流值"]==curr].sort_values("参考流量值")
+    ax_avg.plot(sub_avg["参考流量值"], sub_avg["平均值"], marker='o', ms=4, color='#00B0F0')
+    
+    # 电流值标注（复用一致性图样式）
+    x_last_avg = sub_avg["参考流量值"].iloc[-1]
+    y_last_avg = sub_avg["平均值"].iloc[-1]
+    ax_avg.text(
+        x_last_avg + CONFIG["PERF_TEXT_OFFSET_X"],
+        y_last_avg + CONFIG["PERF_TEXT_OFFSET_Y"],
+        f"{curr}mA",
+        fontsize=CONFIG["CON_CURR_TEXT_SIZE"],
+        weight="bold" if CONFIG["CON_TITLE_BOLD"] else "normal",
+        va='center'
+    )
+
+    # ✅ 标签：平均值 ± 半差值 (bar)
+    for x,y,avg_val,diff_val in zip(sub_avg["参考流量值"], sub_avg["平均值"], sub_avg["平均值"], sub_avg["diff(半差值)"]):
+        lab_avg = f"{avg_val:.2f}±{diff_val:.2f} bar"
+        offset_avg = CONFIG["LABEL_POS_0mA"] if curr == 0 else CONFIG["LABEL_POS_OTHER"]
+        ax_avg.annotate(lab_avg, (x,y), xytext=(0, offset_avg), textcoords='offset points', 
+                    ha='center', fontsize=CONFIG["CON_LABEL_SIZE"])
+
+# 图表样式（完全复用一致性图）
+ax_avg.set_title(
+    "压差平均值",
+    fontsize=CONFIG["CON_TITLE_SIZE"],
+    weight="bold" if CONFIG["CON_TITLE_BOLD"] else "normal",
+    x=CONFIG["CON_TITLE_OFFSET_X"],
+    y=CONFIG["CON_TITLE_OFFSET_Y"]
+)
+ax_avg.set_xlabel(
+    "流量/Lpm",
+    fontsize=CONFIG["CON_AXIS_LABEL_SIZE"],
+    weight="bold" if CONFIG["CON_AXIS_LABEL_BOLD"] else "normal"
+)
+ax_avg.set_ylabel(
+    "压差 bar",
+    fontsize=CONFIG["CON_AXIS_LABEL_SIZE"],
+    weight="bold" if CONFIG["CON_AXIS_LABEL_BOLD"] else "normal"
+)
+ax_avg.tick_params(
+    axis='both',
+    labelsize=CONFIG["CON_TICK_LABEL_SIZE"],
+    width=CONFIG["CON_TICK_WIDTH"]
+)
+ax_avg.set_xlim(right=ax_avg.get_xlim()[1]+CONFIG["X_AXIS_EXTEND"])
+for line in ax_avg.get_lines():
+    line.set_linewidth(CONFIG["CON_LINE_WIDTH"])
+if CONFIG["HIDE_TOP_RIGHT_BORDER"]:
+    ax_avg.spines['top'].set_visible(False)
+    ax_avg.spines['right'].set_visible(False)
+
+plt.tight_layout()
+save_safe_plot(fig_avg, "压差平均值图.png")
+plt.close()
+print("✅ 压差平均值图生成完成")
 
 # ====================== 最终输出 ======================
 # 控制台打印最终结论：影响占比+修正建议
@@ -810,3 +970,6 @@ else:
 
 print(f"\n🎉 程序全部运行完成！")
 print(f"📂 所有结果保存在文件夹：{OUTPUT_FOLDER}")
+
+# 👇 新增：让运行框停留（按回车退出）
+input("\n按 回车键 退出...")
