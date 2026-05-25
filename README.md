@@ -1,235 +1,279 @@
-# 📘 README - PQ一致性检测分析系统
-
-## 🇨🇳 中文版本
+下面是**可直接复制使用的 README.md（对应你这份最终代码）**，已经按工程化结构整理好了：
 
 ---
 
-## 📌 项目简介
+# PQ 产品一致性检测分析系统
 
-本项目用于对**比例电磁阀 / 液压阀测试数据**进行自动化分析与质量评估，包括：
+## 1. 项目简介
 
-* PQ（压力-流量）性能曲线分析
-* 多产品一致性对比
+本项目用于对多组 CSV 工况测试数据进行自动化分析，生成包含以下内容的完整检测报告：
+
+* 产品 PQ 曲线分析（压差-流量特性）
 * 迟滞（Hysteresis）分析
-* 加权一致性影响建模
-* 自动生成 Excel + PNG + SVG 工程报告
+* 产品一致性分析（Max/Min/Avg/Deviation）
+* 加权一致性影响评估（产品优劣排序）
+* 去程 / 回程 PQ 曲线分析
+* 多产品 PQ 对比图
+* Excel 自动报告生成（含嵌入图表）
+* PNG 图形自动输出
 
-支持批量 CSV 数据自动处理。
+系统适用于：
 
----
-
-# 🧭 版本迭代记录（Version History）
-
-## 🟢 v1.0（基础分析版）
-
-**关键词：数据读取 + 基础曲线**
-
-* CSV数据批量读取
-* PQ基础曲线绘制
-* 简单流量-压差关系分析
-* matplotlib基础图表输出
-
-📌 特点：
-
-> 单机脚本，无结构化报告
+* 电磁阀 / 比例阀 / 液压阀测试数据分析
+* 多文件批量性能对比
+* 工况一致性评估与质量分级
 
 ---
 
-## 🟡 v2.0（工程分析版）
+## 2. 环境依赖
 
-**关键词：一致性 + Excel报告**
+### Python版本
 
-新增：
+* Python ≥ 3.8
 
-* 多文件一致性分析
-* max/min/avg统计
-* Excel自动生成（openpyxl）
-* 迟滞计算（前50% vs 后50%）
-* 标准流量点匹配（5/10/20/40/60 L/min）
+### 依赖库
 
-📌 特点：
-
-> 从“画图工具”升级为“测试分析工具”
-
----
-
-## 🔴 v3.0（当前版本｜工程系统版）
-
-**关键词：权重模型 + 自动修正 + SVG报告**
-
-### 🚀 核心升级
-
-#### 1️⃣ 加权一致性影响模型
-
-* 引入电流 + 流量双权重机制
-* 自动识别“最影响一致性的文件”
-* 输出修正系数（scale factor）
-
-#### 2️⃣ PQ分析增强
-
-* 前50%数据建模
-* 多电流曲线自动标注
-* 支持批量产品对比图
-
-#### 3️⃣ 迟滞分析升级
-
-H = |P_{forward} - P_{reverse}|
-
-* 自动计算滞环偏差
-* Excel + 图像双输出
-
-#### 4️⃣ 一致性工程图增强
-
-* 双区域（前50% / 后50%）
-* ±bar / ±% 动态标签切换
-* 工业图表样式统一
-
-#### 5️⃣ 输出系统升级
-
-* Excel（4个Sheet）
-* PNG高清图（300 DPI）
-* SVG矢量图（支持鼠标悬浮文件名）
-* 自动输出目录管理（防重名）
-
-📌 特点：
-
-> 已接近“工业测试分析软件级别”
-
----
-
-## 📂 输出结构
-
-```text
-检测结果输出/
-│
-├── 产品检测结果总表.xlsx
-├── 性能图表/
-├── 迟滞图.png
-├── 一致性图.png
-├── 压差平均值图.png
-├── 所有产品PQ曲线对比图.png
-└── 所有产品PQ曲线对比图_矢量.svg
+```bash
+pip install pandas numpy matplotlib openpyxl
 ```
 
 ---
 
-## ⚙️ 运行方式
+## 3. 输入数据格式
+
+系统自动扫描当前目录下所有 `.csv` 文件。
+
+### CSV格式要求：
+
+| 列索引 | 内容          |
+| --- | ----------- |
+| 1列  | 电流值 (mA)    |
+| 4列  | 流量值 (L/min) |
+| 10列 | 压差值 (bar)   |
+
+> 编码默认：gbk（Windows中文系统）
+
+---
+
+## 4. 输出目录结构
+
+程序运行后自动生成：
+
+```
+检测结果输出/
+│
+├── 产品检测结果总表.xlsx
+├── 性能图表/
+├── 01_去程PQ/
+├── 02_回程PQ/
+├── 03_去程+回程PQ/
+├── 迟滞图.png
+├── 一致性图.png
+├── 压差平均值图.png
+└── PQ总对比图.png
+```
+
+---
+
+## 5. 核心功能说明
+
+### 5.1 数据处理流程
+
+1. 自动扫描 CSV 文件
+2. 提取：
+
+   * 电流值
+   * 流量值
+   * 压差值
+3. 数据清洗（NaN / inf / 非法值）
+4. 按电流分组滤波（仅压差）
+5. 前50% / 后50% 分离（去程 / 回程）
+
+---
+
+### 5.2 PQ曲线分析
+
+* 按标准流量点匹配：
+
+```python
+REF_FLOW = [5, 10, 20, 40, 60]
+```
+
+* 自动生成：
+
+  * 单产品 PQ 曲线
+  * 多产品 PQ 对比曲线
+  * 去程 PQ
+  * 回程 PQ
+  * 去程+回程合并曲线
+
+---
+
+### 5.3 迟滞分析
+
+计算方式：
+
+```
+Hysteresis = |Forward - Backward|
+```
+
+输出：
+
+* 产品迟滞曲线图
+* Excel迟滞表
+* 超标自动染色（红色等级）
+
+---
+
+### 5.4 一致性分析
+
+核心指标：
+
+* Max / Min / Avg
+* 半差值（diff）
+* 一致性百分比
+
+```
+一致性% = (diff / avg) × 100%
+```
+
+---
+
+### 5.5 加权一致性（核心算法）
+
+用于识别“影响整体性能的关键产品”。
+
+特点：
+
+* 按电流分级加权：
+
+  * 0mA 权重最高
+  * 300 / 600 / 900mA递减
+* 关键流量点（20L/min）额外加权
+* 输出：
+
+  * 产品影响占比
+  * 偏差排序
+  * 推荐缩放系数（修正建议）
+
+---
+
+### 5.6 Excel自动报告
+
+包含 4 个核心Sheet：
+
+#### ① 原始数据
+
+* 全部CSV解析结果
+
+#### ② 迟滞数据
+
+* 并自动插入 Scatter Chart
+
+#### ③ 一致性数据
+
+* Max / Min / Avg / Diff
+* 自动生成一致性图表
+
+#### ④ 加权一致性分析
+
+* 产品影响排序
+* 修正建议
+* 0mA 60L/min 修正前后对比
+
+---
+
+## 6. 关键参数配置（CONFIG）
+
+所有参数集中管理，无需改代码逻辑：
+
+### 流量点
+
+```python
+REF_FLOW = [5, 10, 20, 40, 60]
+```
+
+### 一致性阈值
+
+```python
+CONSISTENCY_LIMIT_PCT = 5.0
+```
+
+### 滤波窗口
+
+```python
+FILTER_WINDOW = 201
+```
+
+### 核心流量
+
+```python
+KEY_FLOW = 20
+```
+
+---
+
+## 7. 输出图表说明
+
+### 自动生成图
+
+* 单产品性能曲线
+* PQ总对比图
+* 迟滞图
+* 一致性图
+* 压差平均值图
+* 去程/回程 PQ 图
+* 去程+回程对比图
+
+---
+
+## 8. 算法流程图（简化）
+
+```
+CSV文件
+  ↓
+数据清洗
+  ↓
+滤波处理
+  ↓
+前50% / 后50%拆分
+  ↓
+PQ点匹配
+  ↓
+一致性计算
+  ↓
+加权分析
+  ↓
+Excel + PNG输出
+```
+
+---
+
+## 9. 运行方式
+
+直接运行：
 
 ```bash
-pip install pandas numpy matplotlib openpyxl
 python main.py
 ```
 
 ---
 
-## 📌 应用场景
+## 10. 注意事项
 
-* 电磁阀研发测试
-* 液压系统标定
-* 工业流量控制分析
-* 批量实验数据处理
-
----
-
----
-
-# 🇬🇧 English Version
+* CSV 文件必须放在脚本同目录
+* 列索引不可错（1/4/10）
+* 文件编码默认 gbk
+* FILTER_WINDOW 必须为奇数
+* 数据必须包含前后程结构（50/50）
 
 ---
 
-## 📌 Overview
+## 11. 作者说明
 
-This project is an automated analysis system for **proportional solenoid valve / hydraulic test data**, including:
+本系统为工程级批量测试分析工具，适用于：
 
-* PQ (Pressure-Flow) curve analysis
-* Multi-product consistency evaluation
-* Hysteresis analysis
-* Weighted influence modeling
-* Automatic Excel + PNG + SVG reporting
-
----
-
-# 🧭 Version History
-
-## 🟢 v1.0 - Basic Analysis
-
-* CSV batch loading
-* Basic PQ curve plotting
-* Simple pressure-flow visualization
-
-📌 Status:
-
-> Prototype script
-
----
-
-## 🟡 v2.0 - Engineering Analysis
-
-* Multi-file consistency comparison
-* Max/min/avg statistics
-* Excel report generation
-* Hysteresis calculation (forward vs reverse)
-
-📌 Status:
-
-> Engineering-level analysis tool
-
----
-
-## 🔴 v3.0 - Full Engineering System
-
-### 🚀 Major upgrades
-
-#### Weighted consistency model
-
-* Current + flow weighted influence
-* Automatic outlier file detection
-* Scaling factor recommendation
-
-#### PQ system upgrade
-
-* First 50% data modeling
-* Multi-current curve annotation
-* Batch product comparison
-
-#### Hysteresis analysis
-
-H = |P_{forward} - P_{reverse}|
-
-#### Output system upgrade
-
-* Excel (4 sheets)
-* High-res PNG (300 DPI)
-* SVG vector output (interactive labels)
-* Auto folder management
-
-📌 Status:
-
-> Engineering-grade analysis system
-
----
-
-# 📦 GitHub上传建议（可选）
-
-推荐仓库结构：
-
-```text
-PQ-System/
-│
-├── main.py
-├── README.md
-├── requirements.txt
-├── sample_data/
-└── output/
-```
-
----
-
-# 📌 requirements.txt
-
-```txt
-pandas
-numpy
-matplotlib
-openpyxl
-```
+* 电磁阀研发
+* 液压控制系统测试
+* 工况一致性评估
+* 产品批次对标分析

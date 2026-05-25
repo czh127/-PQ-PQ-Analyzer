@@ -85,18 +85,21 @@ CONFIG = {
     "CON_TICK_WIDTH": 1.2,                      # 刻度线宽度
 
     # ====================== 一致性图表标签样式 ======================
-    "LABEL_POS_0mA": -14,                       # 0mA数据标签垂直偏移（负数向下）
-    "LABEL_POS_OTHER": 8,                       # 其他电流标签垂直偏移（正数向上）
-    "CON_LABEL_SIZE": 10,                       # 误差标注字体大小
+    "LABEL_POS_0mA": -16,                       # 0mA数据标签垂直偏移（负数向下）
+    "LABEL_POS_OTHER": 9,                       # 其他电流标签垂直偏移（正数向上）
+    "CON_LABEL_SIZE": 15,                       # 误差标注字体大小
     "CON_CURR_TEXT_SIZE": 20,                   # 电流值标注字体大小
     
     # ====================== 【功能运行总开关】 ======================
     "RUN_PERFORMANCE_PLOTS": True,       # 生成单文件性能图表
-    "RUN_PQ_COMPARE_PLOT": True,         # 生成所有产品PQ总对比图
+    "RUN_PQ_COMPARE_PLOT": True,         # 生成所有产品PQ总对比散点图
     "RUN_HYSTERESIS_PLOT": True,         # 生成PNG格式迟滞图
     "RUN_CONSISTENCY_PLOT": True,        # 生成一致性分析图
     "RUN_AVG_PRESSURE_PLOT": True,       # 生成压差平均值图
     "RUN_EXCEL_CHARTS": True,            # 在Excel中嵌入迟滞+一致性图表
+    "RUN_EXCEL_REPORT": True,            # 生成完整Excel检测报告
+    "RUN_SINGLE_GOBACK_PQ": True,        # 生成单文件去程/回程/合并PQ图
+    "RUN_ALL_GOBACK_SUMMARY": True,      # 生成全体去程回程总对比图
 }
 
 # ---------------------- 图表颜色配置（固定标准，无需修改） ----------------------
@@ -450,8 +453,8 @@ if CONFIG["RUN_PERFORMANCE_PLOTS"]:
 else:
     print("ℹ️ 已跳过：单产品性能图表")
 
-# ---------------------- 步骤7：生成PQ总对比图 ----------------------
-print("\n【7/12】正在生成所有产品PQ总对比图...")
+# ---------------------- 步骤7：生成PQ总对比散点图 ----------------------
+print("\n【7/12】正在生成所有产品PQ总对比散点图...")
 if CONFIG["RUN_PQ_COMPARE_PLOT"] and pq_comparison_data:
     fig, ax = plt.subplots(figsize=(18, 10), dpi=300)
     fig.set_facecolor('white')
@@ -524,9 +527,9 @@ if CONFIG["RUN_PQ_COMPARE_PLOT"] and pq_comparison_data:
     plt.tight_layout(rect=[0, 0, 0.87, 1])
     save_safe_plot(fig, "所有产品PQ曲线对比图.png", dpi=300)
     plt.close()
-    print("✅ PQ总对比图生成完成")
+    print("✅ PQ总对比散点图生成完成")
 else:
-    print("ℹ️ 已跳过：PQ总对比图")
+    print("ℹ️ 已跳过：PQ总对比散点图")
 
 # ---------------------- 步骤8：计算迟滞数据 ----------------------
 print("\n【8/12】正在计算产品迟滞数据...")
@@ -560,185 +563,188 @@ print("✅ 一致性数据计算完成")
 
 # ---------------------- 步骤10：生成Excel检测报告 ----------------------
 print("\n【10/12】正在生成Excel完整检测报告...")
-wb = Workbook()
-if "Sheet" in wb.sheetnames:
-    del wb["Sheet"]
+if CONFIG["RUN_EXCEL_REPORT"]:
+    wb = Workbook()
+    if "Sheet" in wb.sheetnames:
+        del wb["Sheet"]
 
-# 工作表1：原始检测数据表
-ws1 = wb.create_sheet("原始检测数据")
-ws1.append(["数据源文件","电流值","数据分区","参考流量值","实际压差值","实际流量值","差值数据","校验结果"])
-for _,r in df_raw.iterrows(): 
-    ws1.append(list(r))
+    # 工作表1：原始检测数据表
+    ws1 = wb.create_sheet("原始检测数据")
+    ws1.append(["数据源文件","电流值","数据分区","参考流量值","实际压差值","实际流量值","差值数据","校验结果"])
+    for _,r in df_raw.iterrows(): 
+        ws1.append(list(r))
 
-# 工作表2：迟滞数据+Excel迟滞图表
-ws2 = wb.create_sheet("产品迟滞")
-ws2.append(["数据源文件","电流值","参考流量值","迟滞"])
-for r in hys_data: 
-    ws2.append(r)
-# 提取绘图数据
-plot_hys = df_hys[df_hys["参考流量值"]==CONFIG["PLOT_FLOW"]].copy().sort_values(["数据源文件","电流值"])
-ws2.cell(1,8,"绘图文件名")
-ws2.cell(1,9,"绘图电流")
-ws2.cell(1,10,"绘图迟滞")
-plot_last_row = len(plot_hys) + 1
-for i,(_,r) in enumerate(plot_hys.iterrows(),2):
-    ws2.cell(i,8,r["数据源文件"])
-    ws2.cell(i,9,r["电流值"])
-    ws2.cell(i,10,r["迟滞"])
-ws2.cell(plot_last_row+1,8,"绘图数据结束")
+    # 工作表2：迟滞数据+Excel迟滞图表
+    ws2 = wb.create_sheet("产品迟滞")
+    ws2.append(["数据源文件","电流值","参考流量值","迟滞"])
+    for r in hys_data: 
+        ws2.append(r)
+    # 提取绘图数据
+    plot_hys = df_hys[df_hys["参考流量值"]==CONFIG["PLOT_FLOW"]].copy().sort_values(["数据源文件","电流值"])
+    ws2.cell(1,8,"绘图文件名")
+    ws2.cell(1,9,"绘图电流")
+    ws2.cell(1,10,"绘图迟滞")
+    plot_last_row = len(plot_hys) + 1
+    for i,(_,r) in enumerate(plot_hys.iterrows(),2):
+        ws2.cell(i,8,r["数据源文件"])
+        ws2.cell(i,9,r["电流值"])
+        ws2.cell(i,10,r["迟滞"])
+    ws2.cell(plot_last_row+1,8,"绘图数据结束")
 
-# Excel内嵌迟滞图表
-if CONFIG["RUN_EXCEL_CHARTS"]:
-    chart_hys = ScatterChart()
-    chart_hys.scatterStyle = "lineMarker"
-    chart_hys.title = "P-Q滞环@20L/min"
-    chart_hys.x_axis.title = "电流值"
-    chart_hys.y_axis.title = "迟滞/bar"
+    # Excel内嵌迟滞图表
+    if CONFIG["RUN_EXCEL_CHARTS"]:
+        chart_hys = ScatterChart()
+        chart_hys.scatterStyle = "lineMarker"
+        chart_hys.title = "P-Q滞环@20L/min"
+        chart_hys.x_axis.title = "电流值"
+        chart_hys.y_axis.title = "迟滞/bar"
 
-    # 读取产品列表
-    prod_list = []
-    for row in range(2, plot_last_row+1):
-        prod = ws2.cell(row,8).value
-        if prod and prod not in prod_list:
-            prod_list.append(prod)
-
-    # 逐产品绘制曲线
-    for prod in prod_list:
-        sr = er = None
+        # 读取产品列表
+        prod_list = []
         for row in range(2, plot_last_row+1):
-            if ws2.cell(row,8).value == prod:
-                sr = row if sr is None else sr
-                er = row
-        if sr is None or er is None:
-            continue
-        
-        x = Reference(ws2, 9, sr, 9, er)
-        y = Reference(ws2, 10, sr, 10, er)
-        
-        # 按超标点数设置颜色
-        exceed_num = 0
-        for row in range(sr, er+1):
-            hys_val = ws2.cell(row,10).value
-            if hys_val and float(hys_val) > CONFIG["STD_LIMIT"]:
-                exceed_num += 1
-        color = COLOR_EXCEL[min(exceed_num,4)]
-        
-        ser = Series(y,x,title=prod)
-        ser.marker = Marker(size=3)
-        ser.graphicalProperties.line = LineProperties(solidFill=color, w=10000)
-        chart_hys.series.append(ser)
-    ws2.add_chart(chart_hys, "L2")
+            prod = ws2.cell(row,8).value
+            if prod and prod not in prod_list:
+                prod_list.append(prod)
 
-# 工作表3：一致性数据+Excel一致性图表
-ws3 = wb.create_sheet("一致性对比")
-ws3.append([
-    "电流值","参考流量值","数据分区",
-    "最大值","最大值文件名","最小值","最小值文件名",
-    "平均值","diff(半差值)","一致性%"
-])
-for r in con_data: 
-    ws3.append(r)
+        # 逐产品绘制曲线
+        for prod in prod_list:
+            sr = er = None
+            for row in range(2, plot_last_row+1):
+                if ws2.cell(row,8).value == prod:
+                    sr = row if sr is None else sr
+                    er = row
+            if sr is None or er is None:
+                continue
+            
+            x = Reference(ws2, 9, sr, 9, er)
+            y = Reference(ws2, 10, sr, 10, er)
+            
+            # 按超标点数设置颜色
+            exceed_num = 0
+            for row in range(sr, er+1):
+                hys_val = ws2.cell(row,10).value
+                if hys_val and float(hys_val) > CONFIG["STD_LIMIT"]:
+                    exceed_num += 1
+            color = COLOR_EXCEL[min(exceed_num,4)]
+            
+            ser = Series(y,x,title=prod)
+            ser.marker = Marker(size=3)
+            ser.graphicalProperties.line = LineProperties(solidFill=color, w=10000)
+            chart_hys.series.append(ser)
+        ws2.add_chart(chart_hys, "L2")
 
-# 绘制一致性图表函数
-def draw_con_chart(part, title, col, pos):
-    data = df_con[df_con["数据分区"]==part].sort_values(["电流值","参考流量值"])
-    currs = sorted(data["电流值"].unique())
-    headers = ["电流值","参考流量值","最大值","最大值文件名","最小值","最小值文件名","平均值","diff(半差值)","一致性%","数据标签"]
-    for i,h in enumerate(headers): 
-        ws3.cell(1,col+i,h)
-    
-    data_last_row = 1
-    for i,(_,r) in enumerate(data.iterrows(),2):
-        curr = r["电流值"]
-        flow = r["参考流量值"]
-        dif = r["diff(半差值)"]
-        pct = r["一致性%"]
-        lab = f"±{dif:.2f}bar" if (curr in currs[:2] and flow in [5,10]) else f"±{pct:.2f}%"
-        ws3.cell(i,col+0,curr)
-        ws3.cell(i,col+1,flow)
-        ws3.cell(i,col+2,r["最大值"])
-        ws3.cell(i,col+3,r["最大值文件名"])
-        ws3.cell(i,col+4,r["最小值"])
-        ws3.cell(i,col+5,r["最小值文件名"])
-        ws3.cell(i,col+6,r["平均值"])
-        ws3.cell(i,col+7,dif)
-        ws3.cell(i,col+8,pct)
-        ws3.cell(i,col+9,lab)
-        data_last_row = i
-    ws3.cell(data_last_row+1, col, "绘图数据结束")
-    
-    ch = ScatterChart()
-    ch.scatterStyle = "lineMarker"
-    ch.title = f"一致性 {title}"
-    ch.x_axis.title = "流量/Lpm"
-    ch.y_axis.title = "压差/bar"
-    ch.x_axis.majorGridlines = None
-    ch.y_axis.majorGridlines = None
-    
-    # 读取电流值
-    curr_list = []
-    for row in range(2, data_last_row+1):
-        curr_val = ws3.cell(row, col+0).value
-        if curr_val and curr_val not in curr_list:
-            curr_list.append(curr_val)
-    curr_list = sorted(curr_list)
-    
-    # 逐电流绘图
-    for curr in curr_list:
-        sr = er = None
+    # 工作表3：一致性数据+Excel一致性图表
+    ws3 = wb.create_sheet("一致性对比")
+    ws3.append([
+        "电流值","参考流量值","数据分区",
+        "最大值","最大值文件名","最小值","最小值文件名",
+        "平均值","diff(半差值)","一致性%"
+    ])
+    for r in con_data: 
+        ws3.append(r)
+
+    # 绘制一致性图表函数
+    def draw_con_chart(part, title, col, pos):
+        data = df_con[df_con["数据分区"]==part].sort_values(["电流值","参考流量值"])
+        currs = sorted(data["电流值"].unique())
+        headers = ["电流值","参考流量值","最大值","最大值文件名","最小值","最小值文件名","平均值","diff(半差值)","一致性%","数据标签"]
+        for i,h in enumerate(headers): 
+            ws3.cell(1,col+i,h)
+        
+        data_last_row = 1
+        for i,(_,r) in enumerate(data.iterrows(),2):
+            curr = r["电流值"]
+            flow = r["参考流量值"]
+            dif = r["diff(半差值)"]
+            pct = r["一致性%"]
+            lab = f"±{dif:.2f}bar" if (curr in currs[:2] and flow in [5,10]) else f"±{pct:.2f}%"
+            ws3.cell(i,col+0,curr)
+            ws3.cell(i,col+1,flow)
+            ws3.cell(i,col+2,r["最大值"])
+            ws3.cell(i,col+3,r["最大值文件名"])
+            ws3.cell(i,col+4,r["最小值"])
+            ws3.cell(i,col+5,r["最小值文件名"])
+            ws3.cell(i,col+6,r["平均值"])
+            ws3.cell(i,col+7,dif)
+            ws3.cell(i,col+8,pct)
+            ws3.cell(i,col+9,lab)
+            data_last_row = i
+        ws3.cell(data_last_row+1, col, "绘图数据结束")
+        
+        ch = ScatterChart()
+        ch.scatterStyle = "lineMarker"
+        ch.title = f"一致性 {title}"
+        ch.x_axis.title = "流量/Lpm"
+        ch.y_axis.title = "压差/bar"
+        ch.x_axis.majorGridlines = None
+        ch.y_axis.majorGridlines = None
+        
+        # 读取电流值
+        curr_list = []
         for row in range(2, data_last_row+1):
-            if ws3.cell(row, col+0).value == curr:
-                sr = row if sr is None else sr
-                er = row
-        if sr is None or er is None:
-            continue
+            curr_val = ws3.cell(row, col+0).value
+            if curr_val and curr_val not in curr_list:
+                curr_list.append(curr_val)
+        curr_list = sorted(curr_list)
         
-        x = Reference(ws3, col+1, sr, col+1, er)
-        y = Reference(ws3, col+6, sr, col+6, er)
-        label_ref = Reference(ws3, col+9, sr, col+9, er)
-        
-        ser = Series(y,x,title=f"{curr}mA")
-        ser.marker = Marker(size=4)
-        ser.graphicalProperties.line = LineProperties(solidFill="00B0F0", w=8000)
-        ser.marker.graphicalProperties.solidFill = "00B0F0"
-        ser.dLbl = True
-        ser.labelRef = label_ref
-        ch.series.append(ser)
-    ws3.add_chart(ch, pos)
+        # 逐电流绘图
+        for curr in curr_list:
+            sr = er = None
+            for row in range(2, data_last_row+1):
+                if ws3.cell(row, col+0).value == curr:
+                    sr = row if sr is None else sr
+                    er = row
+            if sr is None or er is None:
+                continue
+            
+            x = Reference(ws3, col+1, sr, col+1, er)
+            y = Reference(ws3, col+6, sr, col+6, er)
+            label_ref = Reference(ws3, col+9, sr, col+9, er)
+            
+            ser = Series(y,x,title=f"{curr}mA")
+            ser.marker = Marker(size=4)
+            ser.graphicalProperties.line = LineProperties(solidFill="00B0F0", w=8000)
+            ser.marker.graphicalProperties.solidFill = "00B0F0"
+            ser.dLbl = True
+            ser.labelRef = label_ref
+            ch.series.append(ser)
+        ws3.add_chart(ch, pos)
 
-if CONFIG["RUN_EXCEL_CHARTS"]:
-    draw_con_chart("前50%", "前50%", 15, "AQ2")
-    draw_con_chart("后50%", "后50%", 28, "AQ20")
+    if CONFIG["RUN_EXCEL_CHARTS"]:
+        draw_con_chart("前50%", "前50%", 15, "AQ2")
+        draw_con_chart("后50%", "后50%", 28, "AQ20")
 
-# 工作表4：加权一致性分析报告
-ws4 = wb.create_sheet("一致性影响分析(加权)")
-ws4.append([
-    "文件名",
-    "加权偏差总分",
-    "影响占比(%)",
-    "建议缩放系数P",
-    "0mA 60L/min 修正说明",
-    "调节建议"
-])
+    # 工作表4：加权一致性分析报告
+    ws4 = wb.create_sheet("一致性影响分析(加权)")
+    ws4.append([
+        "文件名",
+        "加权偏差总分",
+        "影响占比(%)",
+        "建议缩放系数P",
+        "0mA 60L/min 修正说明",
+        "调节建议"
+    ])
 
-if file_score is not None:
-    for f, score in file_score.items():
-        rate = impact_rate.get(f,0)
-        scale = scale_suggest.get(f,1.0)
-        orig_p, new_p = scale_0mA60L.get(f, (0.0, 0.0))
-        correct_msg = f"{orig_p} → {new_p}"
-        note = f"全量程P值 × {scale}"
-        ws4.append([f, round(score,2), rate, scale, correct_msg, note])
+    if file_score is not None:
+        for f, score in file_score.items():
+            rate = impact_rate.get(f,0)
+            scale = scale_suggest.get(f,1.0)
+            orig_p, new_p = scale_0mA60L.get(f, (0.0, 0.0))
+            correct_msg = f"{orig_p} → {new_p}"
+            note = f"全量程P值 × {scale}"
+            ws4.append([f, round(score,2), rate, scale, correct_msg, note])
 
-# 保存Excel文件（防重名）
-excel_path = os.path.join(OUTPUT_FOLDER, CONFIG["OUTPUT_EXCEL"])
-base, ext = os.path.splitext(excel_path)
-cnt = 1
-while os.path.exists(excel_path):
-    excel_path = f"{base}({cnt}){ext}"
-    cnt +=1
-wb.save(excel_path)
-print("✅ Excel检测报告生成完成")
+    # 保存Excel文件（防重名）
+    excel_path = os.path.join(OUTPUT_FOLDER, CONFIG["OUTPUT_EXCEL"])
+    base, ext = os.path.splitext(excel_path)
+    cnt = 1
+    while os.path.exists(excel_path):
+        excel_path = f"{base}({cnt}){ext}"
+        cnt +=1
+    wb.save(excel_path)
+    print("✅ Excel检测报告生成完成")
+else:
+    print("ℹ️ 已跳过：生成完整Excel检测报告")
 
 # ---------------------- 步骤11：生成PNG分析图表 ----------------------
 print("\n【11/12】正在生成迟滞、一致性、压差平均值图表...")
@@ -876,178 +882,192 @@ else:
 
 # ---------------------- 步骤12：生成去程/回程PQ图表 ----------------------
 print("\n【12/12】正在生成去程、回程、合并PQ曲线图...")
-# 创建专用文件夹
-folder_go = os.path.join(OUTPUT_FOLDER, "01_去程PQ")
-folder_back = os.path.join(OUTPUT_FOLDER, "02_回程PQ")
-folder_both = os.path.join(OUTPUT_FOLDER, "03_去程+回程PQ")
-for f in [folder_go, folder_back, folder_both]:
-    if not os.path.exists(f):
-        os.makedirs(f)
 
-LINE_COLOR = "#00B0F0"
-all_go_data = []
-all_back_data = []
-all_both_data = []
+# 单文件去程回程图
+if CONFIG["RUN_SINGLE_GOBACK_PQ"]:
+    # 创建专用文件夹
+    folder_go = os.path.join(OUTPUT_FOLDER, "01_去程PQ")
+    folder_back = os.path.join(OUTPUT_FOLDER, "02_回程PQ")
+    folder_both = os.path.join(OUTPUT_FOLDER, "03_去程+回程PQ")
+    for f in [folder_go, folder_back, folder_both]:
+        if not os.path.exists(f):
+            os.makedirs(f)
 
-# 逐文件生成三张图表
-for file_idx, file in enumerate(csv_files, 1):
-    file_short = os.path.splitext(file)[0]
-    try:
-        df = pd.read_csv(file, usecols=[1,4,10], encoding="gbk")
-        df.columns = ["电流值","流量值","压差值"]
-        df = clean_invalid_data(df)
-        if df.empty: continue
+    LINE_COLOR = "#00B0F0"
+    all_go_data = []
+    all_back_data = []
+    all_both_data = []
 
-        df["压差值滤波"] = df["压差值"].copy()
-        df = filter_press_by_current(df, CONFIG["FILTER_WINDOW"])
-        df["压差值"] = df["压差值滤波"]
-        df = clean_invalid_data(df)
-        if df.empty: continue
+    # 逐文件生成三张图表
+    for file_idx, file in enumerate(csv_files, 1):
+        file_short = os.path.splitext(file)[0]
+        try:
+            df = pd.read_csv(file, usecols=[1,4,10], encoding="gbk")
+            df.columns = ["电流值","流量值","压差值"]
+            df = clean_invalid_data(df)
+            if df.empty: continue
 
-        curr_list = sorted(df["电流值"].unique())
-        file_go = []
-        file_back = []
+            df["压差值滤波"] = df["压差值"].copy()
+            df = filter_press_by_current(df, CONFIG["FILTER_WINDOW"])
+            df["压差值"] = df["压差值滤波"]
+            df = clean_invalid_data(df)
+            if df.empty: continue
 
-        # 去程PQ图
-        fig1, ax1 = plt.subplots(figsize=(12,6), dpi=100)
-        for curr in curr_list:
-            sub = df[df["电流值"]==curr].copy()
-            sub_go = sub.iloc[:len(sub)//2].sort_values("流量值")
-            x = sub_go["流量值"].abs()
-            y = sub_go["压差值"].abs()
-            if len(x)>=2:
-                ax1.plot(x, y, lw=CONFIG["PERF_LINE_WIDTH"], color=LINE_COLOR)
-                ax1.text(x.iloc[-1]+CONFIG["PERF_TEXT_OFFSET_X"], y.iloc[-1]+CONFIG["PERF_TEXT_OFFSET_Y"],
-                        f"{round(curr)}mA", fontsize=CONFIG["PERF_CURR_TEXT_SIZE"], va="center")
-                file_go.append((x,y))
-        ax1.set_title(f"{file_short} 去程PQ", fontsize=CONFIG["PERF_TITLE_SIZE"], 
-                      x=CONFIG["PERF_TITLE_OFFSET_X"], y=CONFIG["PERF_TITLE_OFFSET_Y"])
-        ax1.set_xlabel("流量 L/min", fontsize=CONFIG["PERF_AXIS_LABEL_SIZE"])
-        ax1.set_ylabel("压差 bar", fontsize=CONFIG["PERF_AXIS_LABEL_SIZE"])
-        ax1.tick_params(labelsize=CONFIG["PERF_TICK_LABEL_SIZE"])
-        ax1.set_xlim(right=70)
+            curr_list = sorted(df["电流值"].unique())
+            file_go = []
+            file_back = []
+
+            # 去程PQ图
+            fig1, ax1 = plt.subplots(figsize=(12,6), dpi=100)
+            for curr in curr_list:
+                sub = df[df["电流值"]==curr].copy()
+                sub_go = sub.iloc[:len(sub)//2].sort_values("流量值")
+                x = sub_go["流量值"].abs()
+                y = sub_go["压差值"].abs()
+                if len(x)>=2:
+                    ax1.plot(x, y, lw=CONFIG["PERF_LINE_WIDTH"], color=LINE_COLOR)
+                    ax1.text(x.iloc[-1]+CONFIG["PERF_TEXT_OFFSET_X"], y.iloc[-1]+CONFIG["PERF_TEXT_OFFSET_Y"],
+                            f"{round(curr)}mA", fontsize=CONFIG["PERF_CURR_TEXT_SIZE"], va="center")
+                    file_go.append((x,y))
+            ax1.set_title(f"{file_short} 去程PQ", fontsize=CONFIG["PERF_TITLE_SIZE"], 
+                          x=CONFIG["PERF_TITLE_OFFSET_X"], y=CONFIG["PERF_TITLE_OFFSET_Y"])
+            ax1.set_xlabel("流量 L/min", fontsize=CONFIG["PERF_AXIS_LABEL_SIZE"])
+            ax1.set_ylabel("压差 bar", fontsize=CONFIG["PERF_AXIS_LABEL_SIZE"])
+            ax1.tick_params(labelsize=CONFIG["PERF_TICK_LABEL_SIZE"])
+            ax1.set_xlim(right=70)
+            if CONFIG["HIDE_TOP_RIGHT_BORDER"]:
+                ax1.spines['top'].set_visible(False)
+                ax1.spines['right'].set_visible(False)
+            plt.tight_layout()
+            save_safe_plot(fig1, os.path.join("01_去程PQ", f"去程PQ_{file_idx}.png"))
+            plt.close()
+            all_go_data.append(file_go)
+
+            # 回程PQ图
+            fig2, ax2 = plt.subplots(figsize=(12,6), dpi=100)
+            for curr in curr_list:
+                sub = df[df["电流值"]==curr].copy()
+                sub_back = sub.iloc[len(sub)//2:].sort_values("流量值")
+                x = sub_back["流量值"].abs()
+                y = sub_back["压差值"].abs()
+                if len(x)>=2:
+                    ax2.plot(x, y, lw=CONFIG["PERF_LINE_WIDTH"], color=LINE_COLOR)
+                    ax2.text(x.iloc[-1]+CONFIG["PERF_TEXT_OFFSET_X"], y.iloc[-1]+CONFIG["PERF_TEXT_OFFSET_Y"],
+                            f"{round(curr)}mA", fontsize=CONFIG["PERF_CURR_TEXT_SIZE"], va="center")
+                    file_back.append((x,y))
+            ax2.set_title(f"{file_short} 回程PQ", fontsize=CONFIG["PERF_TITLE_SIZE"], 
+                          x=CONFIG["PERF_TITLE_OFFSET_X"], y=CONFIG["PERF_TITLE_OFFSET_Y"])
+            ax2.set_xlabel("流量 L/min", fontsize=CONFIG["PERF_AXIS_LABEL_SIZE"])
+            ax2.set_ylabel("压差 bar", fontsize=CONFIG["PERF_AXIS_LABEL_SIZE"])
+            ax2.tick_params(labelsize=CONFIG["PERF_TICK_LABEL_SIZE"])
+            ax2.set_xlim(right=70)
+            if CONFIG["HIDE_TOP_RIGHT_BORDER"]:
+                ax2.spines['top'].set_visible(False)
+                ax2.spines['right'].set_visible(False)
+            plt.tight_layout()
+            save_safe_plot(fig2, os.path.join("02_回程PQ", f"回程PQ_{file_idx}.png"))
+            plt.close()
+            all_back_data.append(file_back)
+
+            # 去程+回程合并图
+            fig3, ax3 = plt.subplots(figsize=(12,6), dpi=100)
+            for curr in curr_list:
+                sub = df[df["电流值"]==curr].copy()
+                sub_go = sub.iloc[:len(sub)//2].sort_values("流量值")
+                xg = sub_go["流量值"].abs()
+                yg = sub_go["压差值"].abs()
+                if len(xg)>=2:
+                    ax3.plot(xg, yg, lw=CONFIG["PERF_LINE_WIDTH"], color=LINE_COLOR)
+                sub_back = sub.iloc[len(sub)//2:].sort_values("流量值")
+                xb = sub_back["流量值"].abs()
+                yb = sub_back["压差值"].abs()
+                if len(xb)>=2:
+                    ax3.plot(xb, yb, lw=CONFIG["PERF_LINE_WIDTH"], color=LINE_COLOR)
+                if len(xg)>=2:
+                    ax3.text(xg.iloc[-1]+CONFIG["PERF_TEXT_OFFSET_X"], yg.iloc[-1]+CONFIG["PERF_TEXT_OFFSET_Y"],
+                            f"{round(curr)}mA", fontsize=CONFIG["PERF_CURR_TEXT_SIZE"], va="center")
+            ax3.set_title(f"{file_short} 去程+回程PQ", fontsize=CONFIG["PERF_TITLE_SIZE"], 
+                          x=CONFIG["PERF_TITLE_OFFSET_X"], y=CONFIG["PERF_TITLE_OFFSET_Y"])
+            ax3.set_xlabel("流量 L/min", fontsize=CONFIG["PERF_AXIS_LABEL_SIZE"])
+            ax3.set_ylabel("压差 bar", fontsize=CONFIG["PERF_AXIS_LABEL_SIZE"])
+            ax3.tick_params(labelsize=CONFIG["PERF_TICK_LABEL_SIZE"])
+            ax3.set_xlim(right=70)
+            if CONFIG["HIDE_TOP_RIGHT_BORDER"]:
+                ax3.spines['top'].set_visible(False)
+                ax3.spines['right'].set_visible(False)
+            plt.tight_layout()
+            save_safe_plot(fig3, os.path.join("03_去程+回程PQ", f"去程回程对比_{file_idx}.png"))
+            plt.close()
+            all_both_data.append((file_go, file_back))
+
+        except Exception as e:
+            print(f"⚠️ {file} 图表生成失败：{str(e)}")
+            plt.close('all')
+    print("✅ 单文件去程/回程/合并PQ图生成完成")
+else:
+    all_go_data = []
+    all_back_data = []
+    all_both_data = []
+    print("ℹ️ 已跳过：单文件去程/回程/合并PQ图")
+
+# 全体去程回程总对比图
+if CONFIG["RUN_ALL_GOBACK_SUMMARY"]:
+    print("\n正在生成所有文件PQ总对比图...")
+    if CONFIG["RUN_SINGLE_GOBACK_PQ"]:
+        # 去程总对比
+        fig_go, ax_go = plt.subplots(figsize=(15,8), dpi=150)
+        for file_data in all_go_data:
+            for x,y in file_data:
+                ax_go.plot(x, y, color=LINE_COLOR, lw=1.0)
+        ax_go.set_title("所有文件 去程PQ总对比", fontsize=20, pad=20)
+        ax_go.set_xlabel("流量 L/min", fontsize=14)
+        ax_go.set_ylabel("压差 bar", fontsize=14)
+        ax_go.set_xlim(right=70)
         if CONFIG["HIDE_TOP_RIGHT_BORDER"]:
-            ax1.spines['top'].set_visible(False)
-            ax1.spines['right'].set_visible(False)
+            ax_go.spines['top'].set_visible(False)
+            ax_go.spines['right'].set_visible(False)
         plt.tight_layout()
-        save_safe_plot(fig1, os.path.join("01_去程PQ", f"去程PQ_{file_idx}.png"))
+        save_safe_plot(fig_go, os.path.join("01_去程PQ", "所有文件_去程总对比.png"))
         plt.close()
-        all_go_data.append(file_go)
 
-        # 回程PQ图
-        fig2, ax2 = plt.subplots(figsize=(12,6), dpi=100)
-        for curr in curr_list:
-            sub = df[df["电流值"]==curr].copy()
-            sub_back = sub.iloc[len(sub)//2:].sort_values("流量值")
-            x = sub_back["流量值"].abs()
-            y = sub_back["压差值"].abs()
-            if len(x)>=2:
-                ax2.plot(x, y, lw=CONFIG["PERF_LINE_WIDTH"], color=LINE_COLOR)
-                ax2.text(x.iloc[-1]+CONFIG["PERF_TEXT_OFFSET_X"], y.iloc[-1]+CONFIG["PERF_TEXT_OFFSET_Y"],
-                        f"{round(curr)}mA", fontsize=CONFIG["PERF_CURR_TEXT_SIZE"], va="center")
-                file_back.append((x,y))
-        ax2.set_title(f"{file_short} 回程PQ", fontsize=CONFIG["PERF_TITLE_SIZE"], 
-                      x=CONFIG["PERF_TITLE_OFFSET_X"], y=CONFIG["PERF_TITLE_OFFSET_Y"])
-        ax2.set_xlabel("流量 L/min", fontsize=CONFIG["PERF_AXIS_LABEL_SIZE"])
-        ax2.set_ylabel("压差 bar", fontsize=CONFIG["PERF_AXIS_LABEL_SIZE"])
-        ax2.tick_params(labelsize=CONFIG["PERF_TICK_LABEL_SIZE"])
-        ax2.set_xlim(right=70)
+        # 回程总对比
+        fig_back, ax_back = plt.subplots(figsize=(15,8), dpi=150)
+        for file_data in all_back_data:
+            for x,y in file_data:
+                ax_back.plot(x, y, color=LINE_COLOR, lw=1.0)
+        ax_back.set_title("所有文件 回程PQ总对比", fontsize=20, pad=20)
+        ax_back.set_xlabel("流量 L/min", fontsize=14)
+        ax_back.set_ylabel("压差 bar", fontsize=14)
+        ax_back.set_xlim(right=70)
         if CONFIG["HIDE_TOP_RIGHT_BORDER"]:
-            ax2.spines['top'].set_visible(False)
-            ax2.spines['right'].set_visible(False)
+            ax_back.spines['top'].set_visible(False)
+            ax_back.spines['right'].set_visible(False)
         plt.tight_layout()
-        save_safe_plot(fig2, os.path.join("02_回程PQ", f"回程PQ_{file_idx}.png"))
+        save_safe_plot(fig_back, os.path.join("02_回程PQ", "所有文件_回程总对比.png"))
         plt.close()
-        all_back_data.append(file_back)
 
-        # 去程+回程合并图
-        fig3, ax3 = plt.subplots(figsize=(12,6), dpi=100)
-        for curr in curr_list:
-            sub = df[df["电流值"]==curr].copy()
-            sub_go = sub.iloc[:len(sub)//2].sort_values("流量值")
-            xg = sub_go["流量值"].abs()
-            yg = sub_go["压差值"].abs()
-            if len(xg)>=2:
-                ax3.plot(xg, yg, lw=CONFIG["PERF_LINE_WIDTH"], color=LINE_COLOR)
-            sub_back = sub.iloc[len(sub)//2:].sort_values("流量值")
-            xb = sub_back["流量值"].abs()
-            yb = sub_back["压差值"].abs()
-            if len(xb)>=2:
-                ax3.plot(xb, yb, lw=CONFIG["PERF_LINE_WIDTH"], color=LINE_COLOR)
-            if len(xg)>=2:
-                ax3.text(xg.iloc[-1]+CONFIG["PERF_TEXT_OFFSET_X"], yg.iloc[-1]+CONFIG["PERF_TEXT_OFFSET_Y"],
-                        f"{round(curr)}mA", fontsize=CONFIG["PERF_CURR_TEXT_SIZE"], va="center")
-        ax3.set_title(f"{file_short} 去程+回程PQ", fontsize=CONFIG["PERF_TITLE_SIZE"], 
-                      x=CONFIG["PERF_TITLE_OFFSET_X"], y=CONFIG["PERF_TITLE_OFFSET_Y"])
-        ax3.set_xlabel("流量 L/min", fontsize=CONFIG["PERF_AXIS_LABEL_SIZE"])
-        ax3.set_ylabel("压差 bar", fontsize=CONFIG["PERF_AXIS_LABEL_SIZE"])
-        ax3.tick_params(labelsize=CONFIG["PERF_TICK_LABEL_SIZE"])
-        ax3.set_xlim(right=70)
+        # 去程+回程总对比
+        fig_both, ax_both = plt.subplots(figsize=(15,8), dpi=150)
+        for go_data, back_data in all_both_data:
+            for x,y in go_data:
+                ax_both.plot(x, y, color=LINE_COLOR, lw=1.0)
+            for x,y in back_data:
+                ax_both.plot(x, y, color=LINE_COLOR, lw=1.0)
+        ax_both.set_title("所有文件 去程+回程PQ总对比", fontsize=20, pad=20)
+        ax_both.set_xlabel("流量 L/min", fontsize=14)
+        ax_both.set_ylabel("压差 bar", fontsize=14)
+        ax_both.set_xlim(right=70)
         if CONFIG["HIDE_TOP_RIGHT_BORDER"]:
-            ax3.spines['top'].set_visible(False)
-            ax3.spines['right'].set_visible(False)
+            ax_both.spines['top'].set_visible(False)
+            ax_both.spines['right'].set_visible(False)
         plt.tight_layout()
-        save_safe_plot(fig3, os.path.join("03_去程+回程PQ", f"去程回程对比_{file_idx}.png"))
+        save_safe_plot(fig_both, os.path.join("03_去程+回程PQ", "所有文件_去程回程总对比.png"))
         plt.close()
-        all_both_data.append((file_go, file_back))
-
-    except Exception as e:
-        print(f"⚠️ {file} 图表生成失败：{str(e)}")
-        plt.close('all')
-
-# 生成总对比图
-print("\n正在生成所有文件总对比图...")
-# 去程总对比
-fig_go, ax_go = plt.subplots(figsize=(15,8), dpi=150)
-for file_data in all_go_data:
-    for x,y in file_data:
-        ax_go.plot(x, y, color=LINE_COLOR, lw=1.0)
-ax_go.set_title("所有文件 去程PQ总对比", fontsize=20, pad=20)
-ax_go.set_xlabel("流量 L/min", fontsize=14)
-ax_go.set_ylabel("压差 bar", fontsize=14)
-ax_go.set_xlim(right=70)
-if CONFIG["HIDE_TOP_RIGHT_BORDER"]:
-    ax_go.spines['top'].set_visible(False)
-    ax_go.spines['right'].set_visible(False)
-plt.tight_layout()
-save_safe_plot(fig_go, os.path.join("01_去程PQ", "所有文件_去程总对比.png"))
-plt.close()
-
-# 回程总对比
-fig_back, ax_back = plt.subplots(figsize=(15,8), dpi=150)
-for file_data in all_back_data:
-    for x,y in file_data:
-        ax_back.plot(x, y, color=LINE_COLOR, lw=1.0)
-ax_back.set_title("所有文件 回程PQ总对比", fontsize=20, pad=20)
-ax_back.set_xlabel("流量 L/min", fontsize=14)
-ax_back.set_ylabel("压差 bar", fontsize=14)
-ax_back.set_xlim(right=70)
-if CONFIG["HIDE_TOP_RIGHT_BORDER"]:
-    ax_back.spines['top'].set_visible(False)
-    ax_back.spines['right'].set_visible(False)
-plt.tight_layout()
-save_safe_plot(fig_back, os.path.join("02_回程PQ", "所有文件_回程总对比.png"))
-plt.close()
-
-# 去程+回程总对比
-fig_both, ax_both = plt.subplots(figsize=(15,8), dpi=150)
-for go_data, back_data in all_both_data:
-    for x,y in go_data:
-        ax_both.plot(x, y, color=LINE_COLOR, lw=1.0)
-    for x,y in back_data:
-        ax_both.plot(x, y, color=LINE_COLOR, lw=1.0)
-ax_both.set_title("所有文件 去程+回程PQ总对比", fontsize=20, pad=20)
-ax_both.set_xlabel("流量 L/min", fontsize=14)
-ax_both.set_ylabel("压差 bar", fontsize=14)
-ax_both.set_xlim(right=70)
-if CONFIG["HIDE_TOP_RIGHT_BORDER"]:
-    ax_both.spines['top'].set_visible(False)
-    ax_both.spines['right'].set_visible(False)
-plt.tight_layout()
-save_safe_plot(fig_both, os.path.join("03_去程+回程PQ", "所有文件_去程回程总对比.png"))
-plt.close()
-
-print("✅ 全部PQ图表生成完成！")
+        print("✅ 全体去程回程总对比图生成完成！")
+    else:
+        print("ℹ️ 已跳过：全体去程回程总对比图（需先开启单文件PQ图）")
+else:
+    print("ℹ️ 已跳过：全体去程回程总对比图")
 
 # ====================== 最终结果输出 ======================
 print("\n" + "="*85)
