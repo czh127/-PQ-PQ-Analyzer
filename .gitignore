@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+
+检测结果输出/
+检测结果输出_*/
+
+*.xlsx
+*.png
+
+.vscode/
+.idea/
