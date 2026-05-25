@@ -4,7 +4,7 @@
 
 # 📄 CHANGELOG
 
-## [v6.0] - Final Release
+## [v7.0] - Final Release
 
 ### 🚀 Added（新增）
 
@@ -119,7 +119,7 @@
 
 ---
 
-## [v5.0] - Analysis Expansion
+## [v6.0] - Analysis Expansion
 
 ### Added
 
@@ -136,7 +136,7 @@
 
 ---
 
-## [v4.0] - Consistency Engine
+## [v5.0] - Consistency Engine
 
 ### Added
 
@@ -150,7 +150,7 @@
 
 ---
 
-## [v3.0] - PQ Data Processing
+## [v4.0] - PQ Data Processing
 
 ### Added
 
